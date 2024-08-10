@@ -1,0 +1,207 @@
+qfunc identify_block(num_data_qubits: int, qvar: qbit[], qubit: qbit) {
+  block_qubits: qnum<qvar.len - num_data_qubits, False, 0>;
+  data: qbit[num_data_qubits];
+  qvar -> {block_qubits, data};
+  qubit ^= block_qubits == 0;
+  {block_qubits, data} -> qvar;
+}
+
+qfunc S_m(j: qnum<2, False, 0>, m_j: qnum<4, False, 0>) {
+  control (j == 0) {
+    inplace_prepare_int(15, m_j);
+  }
+  control (j == 1) {
+    inplace_prepare_int(15, m_j);
+  }
+}
+
+qfunc S_k(j: qnum<2, False, 0>, k: qnum<2, False, 0>, k_jk: qnum<4, False, 0>) {
+  control ((j == 0) and (k == 0)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 0) and (k == 1)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 1) and (k == 0)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 1) and (k == 1)) {
+    inplace_prepare_int(15, k_jk);
+  }
+}
+
+qfunc inequality_test_to_induce_amplitude(k_jk: qnum<4, False, 0>, m_j: qnum<4, False, 0>, target: qbit) {
+  x: qnum<4, False, 4>;
+  allocate(4, x);
+  hadamard_transform(x);
+  control (((k_jk * 1.0) / 16) <= ((((1 * m_j) / 16) * (x ** 2)) * 1.0)) {
+    X(target);
+  }
+  hadamard_transform(x);
+}
+
+qfunc bitwise_swap(a: qbit[], b: qbit[]) {
+  repeat (i: a.len) {
+    SWAP(a[i], b[i]);
+  }
+}
+
+qfunc apply_test(j: qnum<2, False, 0>, k: qnum<2, False, 0>, target: qbit) {
+  bitwise_swap(j, k);
+  X(target);
+}
+
+qfunc inequality_test_to_rearrange_sum(j: qnum<2, False, 0>, k: qnum<2, False, 0>, target: qbit) {
+  control (k < j) {
+    apply_test(j, k, target);
+  }
+}
+
+qfunc B_dagger(j: qnum<2, False, 0>, k: qnum<2, False, 0>) {
+  m_j: qnum<4, False, 0>;
+  k_jk: qnum<4, False, 0>;
+  allocate(4, m_j);
+  allocate(4, k_jk);
+  target1: qbit;
+  allocate(1, target1);
+  within {
+    S_m(j, m_j);
+    S_k(j, k, k_jk);
+  } apply {
+    inequality_test_to_induce_amplitude(k_jk, m_j, target1);
+  }
+  target2: qbit;
+  allocate(1, target2);
+  inequality_test_to_rearrange_sum(j, k, target2);
+  Z(target2);
+  H(target2);
+}
+
+qfunc U_cond(register: qbit[]) {
+  cond_ancilla: qbit;
+  allocate(1, cond_ancilla);
+  within {
+    H(cond_ancilla);
+  } apply {
+    control (cond_ancilla == 0) {
+      reflect_about_zero(register);
+    }
+    control (cond_ancilla == 1) {
+      IDENTITY(register);
+    }
+  }
+}
+
+qfunc Hamiltonian(register: qbit[], proj: qbit[]) {
+  k: qnum<2, False, 0>;
+  allocate(2, k);
+  hadamard_transform(k);
+  ctrl: qbit;
+  allocate(1, ctrl);
+  within {
+    H(ctrl);
+  } apply {
+    control (ctrl == 1) {
+      invert {
+        B_dagger(register, k);
+      }
+    }
+    U_cond(proj);
+    control (ctrl == 0) {
+      B_dagger(register, k);
+    }
+    X(ctrl);
+  }
+}
+
+qfunc my_qsvt(phases: real[], qsvt_aux: qbit, block_ham: qbit[], data: qbit[]) {
+  combined_vars: qbit[];
+  {block_ham, data} -> combined_vars;
+  qsvt(phases, lambda(qvar, qubit) {
+    identify_block(data.len, qvar, qubit);
+  }, lambda(qvar, qubit) {
+    identify_block(data.len, qvar, qubit);
+  }, lambda(x) {
+    Hamiltonian(x[block_ham.len:x.len], x[0:block_ham.len]);
+  }, combined_vars, qsvt_aux);
+  combined_vars -> {block_ham, data};
+}
+
+qfunc main(output qsvt_aux: qbit, output block_ham: qnum, output data: qnum, output block_exp: qbit) {
+  allocate(1, qsvt_aux);
+  allocate(1, block_exp);
+  allocate(2, block_ham);
+  prepare_amplitudes([0.5, 0.5, 0.5, 0.5], 0.0, data);
+  within {
+    H(block_exp);
+  } apply {
+    control (block_exp == 0) {
+      my_qsvt([
+        4.265307401397,
+        3.805345850778,
+        2.449640860591,
+        1.524953546775,
+        4.008112023198,
+        4.586150237827,
+        3.963708775279,
+        3.57323445202,
+        1.89174763567,
+        1.423841658821,
+        1.651702895511,
+        2.518554809816,
+        4.918738037766,
+        3.352773628347,
+        0.508223336957,
+        3.352773542267,
+        4.918738184473,
+        2.518555262953,
+        1.651703187332,
+        7.707026871241,
+        1.891747315013,
+        3.573234167272,
+        3.963708541935,
+        (-1.697035013787),
+        4.008112524082,
+        7.808139054102,
+        2.449640540684,
+        (-2.477839615141),
+        (-86.84087947045)
+      ], qsvt_aux, block_ham, data);
+    }
+    control (block_exp == 1) {
+      U(0, 0, 0, pi / 2, qsvt_aux);
+      my_qsvt([
+        4.584086800213,
+        3.372076390906,
+        2.365133977954,
+        2.80074238579,
+        2.954001161119,
+        2.226058219146,
+        2.987370976887,
+        2.820691898287,
+        3.247461884467,
+        4.375636651772,
+        2.446598558515,
+        2.450685156433,
+        4.565019947433,
+        1.166990367874,
+        5.857858571741,
+        (-0.425275662012),
+        7.450581974565,
+        (-1.717988273474),
+        8.733631889724,
+        2.4466281377,
+        4.375646815278,
+        (-3.035742543767),
+        9.103919095454,
+        2.987374166836,
+        2.226055016986,
+        2.954012308275,
+        2.800723299661,
+        2.365132450728,
+        3.372071474151,
+        (-89.663705931064)
+      ], qsvt_aux, block_ham, data);
+    }
+  }
+}

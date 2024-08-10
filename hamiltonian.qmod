@@ -1,0 +1,114 @@
+qfunc S_m(j: qnum<2, False, 0>, m_j: qnum<4, False, 0>) {
+  control (j == 0) {
+    inplace_prepare_int(15, m_j);
+  }
+  control (j == 1) {
+    inplace_prepare_int(15, m_j);
+  }
+}
+
+qfunc S_k(j: qnum<2, False, 0>, k: qnum<2, False, 0>, k_jk: qnum<4, False, 0>) {
+  control ((j == 0) and (k == 0)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 0) and (k == 1)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 1) and (k == 0)) {
+    inplace_prepare_int(15, k_jk);
+  }
+  control ((j == 1) and (k == 1)) {
+    inplace_prepare_int(15, k_jk);
+  }
+}
+
+qfunc inequality_test_to_induce_amplitude(k_jk: qnum<4, False, 0>, m_j: qnum<4, False, 0>, target: qbit) {
+  x: qnum<4, False, 4>;
+  allocate(4, x);
+  hadamard_transform(x);
+  control (((k_jk * 1.0) / 16) <= ((((1 * m_j) / 16) * (x ** 2)) * 1.0)) {
+    X(target);
+  }
+  hadamard_transform(x);
+}
+
+qfunc bitwise_swap(a: qbit[], b: qbit[]) {
+  repeat (i: a.len) {
+    SWAP(a[i], b[i]);
+  }
+}
+
+qfunc apply_test(j: qnum<2, False, 0>, k: qnum<2, False, 0>, target: qbit) {
+  bitwise_swap(j, k);
+  X(target);
+}
+
+qfunc inequality_test_to_rearrange_sum(j: qnum<2, False, 0>, k: qnum<2, False, 0>, target: qbit) {
+  control (k < j) {
+    apply_test(j, k, target);
+  }
+}
+
+qfunc B_dagger(j: qnum<2, False, 0>, k: qnum<2, False, 0>) {
+  m_j: qnum<4, False, 0>;
+  k_jk: qnum<4, False, 0>;
+  allocate(4, m_j);
+  allocate(4, k_jk);
+  target1: qbit;
+  allocate(1, target1);
+  within {
+    S_m(j, m_j);
+    S_k(j, k, k_jk);
+  } apply {
+    inequality_test_to_induce_amplitude(k_jk, m_j, target1);
+  }
+  target2: qbit;
+  allocate(1, target2);
+  inequality_test_to_rearrange_sum(j, k, target2);
+  Z(target2);
+  H(target2);
+}
+
+qfunc U_cond(register: qbit[]) {
+  cond_ancilla: qbit;
+  allocate(1, cond_ancilla);
+  within {
+    H(cond_ancilla);
+  } apply {
+    control (cond_ancilla == 0) {
+      reflect_about_zero(register);
+    }
+    control (cond_ancilla == 1) {
+      IDENTITY(register);
+    }
+  }
+}
+
+qfunc Hamiltonian(register: qbit[], proj: qbit[]) {
+  k: qnum<2, False, 0>;
+  allocate(2, k);
+  hadamard_transform(k);
+  ctrl: qbit;
+  allocate(1, ctrl);
+  within {
+    H(ctrl);
+  } apply {
+    control (ctrl == 1) {
+      invert {
+        B_dagger(register, k);
+      }
+    }
+    U_cond(proj);
+    control (ctrl == 0) {
+      B_dagger(register, k);
+    }
+    X(ctrl);
+  }
+}
+
+qfunc main(output j: qnum, output proj: qbit[]) {
+  allocate(2, j);
+  allocate(2, proj);
+  hadamard_transform(j);
+  Hamiltonian(j, proj);
+}
